@@ -1,0 +1,221 @@
+//只要寻找要识别的物体在哪里就可以了。。。。
+
+#include "detect.h"
+#include <algorithm>
+using namespace std;
+//using namespace cv;
+
+/*void Detection::tracking()
+{
+
+}*/
+
+
+void Detection::detect_object()
+{
+
+    int num;
+    int minHessian = 400;
+    cv::SurfFeatureDetector  featureDetector( minHessian );
+    cv::SurfDescriptorExtractor descriptorExtractor;
+    cv::FlannBasedMatcher  descriptorMatcher;
+
+   //featureDetector = FeatureDetector::create( "SURF" );
+    //descriptorExtractor = DescriptorExtractor::create(  "SURF" );
+    //descriptorMatcher = DescriptorMatcher::create( "FlannBased" );
+    //bool isCreated = !( featureDetector.empty() || descriptorExtractor.empty() || descriptorMatcher.empty() );
+    //if( !isCreated )
+       // cout << "Can not create feature detector or descriptor extractor or descriptor matcher of given types." << endl  << endl;
+    cv::Mat queryImage[10];
+    cv::Mat queryDescriptors[10];
+    vector<cv::KeyPoint> queryKeypoints[10];
+    cv::Rect box;
+
+    int length=my_points.size();
+    for(int k=0;k<length;k++)
+    {
+        cv::Mat frame;
+        box.x=my_points[k].x_left_down;
+        box.y=my_points[k].y_left_down;
+        box.width=my_points[k].x_right_up-my_points[k].x_left_down;
+        box.height=my_points[k].y_right_up-my_points[k].y_left_down;
+        image(box).copyTo(queryImage[k]);
+        //queryImage[k]=Mat(image,box).clone();
+
+        cv::cvtColor(queryImage[k],frame,CV_BGR2GRAY);
+        featureDetector->detect( frame, queryKeypoints[k] );
+        descriptorExtractor->compute( frame, queryKeypoints[k], queryDescriptors[k] );
+    }
+
+    if(s!=2)
+    {
+        if(s>100)
+            num=s%100;
+        else
+            num=s%10;
+        descriptorMatcher->add(trainmodel.objectclassDescriptors[num]);
+        descriptorMatcher->train();
+        vector<DMatch> matches[10];
+         vector<DMatch>   jjj;
+        vector< DMatch > good_matches[10];
+        int k;
+        for(k=0;k<length;k++)
+        {
+            descriptorMatcher->match( queryDescriptors[k], jjj);
+            matches[k]=jjj;
+            double max_dist = 0; double min_dist = 100;
+            for( int i = 0; i < queryDescriptors[k].rows; i++ )
+            {
+                double dist = matches[k][i].distance;
+                if( dist < min_dist ) min_dist = dist;
+                if( dist > max_dist ) max_dist = dist;
+            }
+            for( int i = 0; i < queryDescriptors[k].rows; i++ )
+            {
+                if( matches[k][i].distance < 2*min_dist )
+                    { good_matches[k].push_back( matches[k][i]); }
+            }
+
+        }
+        Point point[10];
+        for (int i=0;i<length;i++)
+        {
+            point[i].x=i;
+            point[i].y=good_matches[i].size();
+        }
+        sort(point,point+length,Detection::compare());
+        if(length==1)
+        {
+            track_object.x=my_points[0].x_left_down;
+            track_object.y=my_points[0].y_left_down;
+            track_object.width=my_points[0].x_right_up-my_points[0].x_left_down;
+            track_object.height=my_points[0].y_right_up-my_points[0].y_left_down;
+        }
+        else if((point[0].y)/(point[1].y)>=2)
+        {
+            track_object.x=my_points[point[0].x].x_left_down;
+            track_object.y=my_points[point[0].x].y_left_down;
+            track_object.width=my_points[point[0].x].x_right_up-my_points[point[0].x].x_left_down;
+            track_object.height=my_points[point[0].x].y_right_up-my_points[point[0].x].y_left_down;
+        }
+        else
+        {
+            int imagenum=trainmodel.objectclassimages[num].size();
+            double hismax[2];
+            hismax[0]=-100.0;
+            hismax[1]=-100.0;
+            for(int kk=0;kk<2;kk++)
+            {
+                cv::Mat hsv_base,hsv_test;
+                cv::cvtColor( queryImage[point[kk].x], hsv_base, CV_BGR2HSV );
+                for(int ii=0;ii<imagenum;ii++)
+                {
+                    cv::cvtColor(trainmodel.objectclassimages[num][ii], hsv_test, CV_BGR2HSV );
+                    int h_bins = 50; int s_bins = 60;
+                    int histSize[] = { h_bins, s_bins };
+
+                    // hue的取值范围从0到256, saturation取值范围从0到180
+                    float h_ranges[] = { 0, 256 };
+                    float s_ranges[] = { 0, 180 };
+
+                    const float* ranges[] = { h_ranges, s_ranges };
+
+                    // 使用第0和第1通道
+                    int channels[] = { 0, 1 };
+
+                    /// 直方图
+                    cv::MatND hist_base;
+                    cv::MatND hist_test1;
+
+
+                    /// 计算HSV图像的直方图
+                    cv::calcHist( &hsv_base, 1, channels, cv::Mat(), hist_base, 2, histSize, ranges, true, false );
+                    cv::normalize( hist_base, hist_base, 0, 1, cv::NORM_MINMAX, -1, cv::Mat() );
+
+
+                    cv::calcHist( &hsv_test, 1, channels, cv::Mat(), hist_test1, 2, histSize, ranges, true, false );
+                    cv::normalize( hist_test1, hist_test1, 0, 1, cv::NORM_MINMAX, -1, cv::Mat() );
+                    double base_test1 = compareHist( hist_base, hist_test1, 1 );
+
+                    if(base_test1>hismax[kk])
+                        hismax[kk]=base_test1;
+                }
+            }
+            if(hismax[0]>hismax[1])
+            {
+                track_object.x=my_points[point[0].x].x_left_down;
+                track_object.y=my_points[point[0].x].y_left_down;
+                track_object.width=my_points[point[0].x].x_right_up-my_points[point[0].x].x_left_down;
+                track_object.height=my_points[point[0].x].y_right_up-my_points[point[0].x].y_left_down;
+            }
+            else
+            {
+                track_object.x=my_points[point[1].x].x_left_down;
+                track_object.y=my_points[point[1].x].y_left_down;
+                track_object.width=my_points[point[1].x].x_right_up-my_points[point[1].x].x_left_down;
+                track_object.height=my_points[point[1].x].y_right_up-my_points[point[1].x].y_left_down;
+            }
+        }
+    }
+   /* else
+    {
+        int i;
+        descriptorMatcher->add(trainmodel.trainDescriptors);
+        descriptorMatcher->train();
+        vector<cv::DMatch> matches;
+        vector< cv::DMatch > good_matches;
+        descriptorMatcher->match( queryDescriptors[0], matches );
+        double max_dist = 0; double min_dist = 100;
+        for( int i = 0; i < queryDescriptors[0].rows; i++ )
+        {
+            double dist = matches[i].distance;
+            if( dist < min_dist ) min_dist = dist;
+            if( dist > max_dist ) max_dist = dist;
+        }
+        for(  i = 0; i < queryDescriptors[0].rows; i++ )
+        {
+            if( matches[i].distance < 2*min_dist )
+                { good_matches.push_back( matches[i]); }
+        }
+        int objectnum=sum;       //保存有多少物品
+        int  p[30];                                                                                           //最多30个物品
+        for(i=1;i<=objectnum;i++)
+            p[i]=0;
+        for(i=0;i<good_matches.size();i++)
+        {
+            p[trainmodel.trainKeyPoints[good_matches[i].imgIdx][good_matches[i].trainIdx].class_id]++;
+        }
+
+
+        Point point[30];
+        for ( i=1;i<=objectnum;i++)
+        {
+            point[i].x=i;
+            point[i].y=p[i];
+        }
+        sort(point+1,point+objectnum+1,Detection::compare());
+
+        if((point[1].y)/(point[2].y)>2)
+            cout<<point[1].x<<endl;
+        else
+        {
+
+        }
+
+
+
+    }*/
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
